@@ -543,15 +543,20 @@ with st.sidebar:
     session_options = {s["session_id"]: s["name"] for s in all_sessions}
 
     def on_session_change():
+        st.session_state.current_session_id = st.session_state.selectbox_session_id
         st.session_state.messages = load_messages_from_db(st.session_state.current_session_id)
         st.session_state.total_tokens_used = 0
         st.session_state.api_calls = 0
 
+    option_keys = list(session_options.keys())
+    active_index = option_keys.index(st.session_state.current_session_id) if st.session_state.current_session_id in option_keys else 0
+
     st.selectbox(
         "Active Chat",
-        options=list(session_options.keys()),
+        options=option_keys,
+        index=active_index,
         format_func=lambda x: session_options.get(x, "Unknown"),
-        key="current_session_id",
+        key="selectbox_session_id",
         on_change=on_session_change,
         label_visibility="collapsed"
     )
@@ -561,17 +566,22 @@ with st.sidebar:
         if st.button("➕ New Space", use_container_width=True):
             new_id = create_new_session("New Chat")
             st.session_state.current_session_id = new_id
-            on_session_change()
+            st.session_state.messages = load_messages_from_db(new_id)
+            st.session_state.total_tokens_used = 0
+            st.session_state.api_calls = 0
             st.rerun()
     with colB:
         if st.button("🗑️ Delete", use_container_width=True):
             delete_session(st.session_state.current_session_id)
             updated_sessions = get_all_sessions()
             if updated_sessions:
-                st.session_state.current_session_id = updated_sessions[0]["session_id"]
+                next_id = updated_sessions[0]["session_id"]
             else:
-                st.session_state.current_session_id = create_new_session("New Chat")
-            on_session_change()
+                next_id = create_new_session("New Chat")
+            st.session_state.current_session_id = next_id
+            st.session_state.messages = load_messages_from_db(next_id)
+            st.session_state.total_tokens_used = 0
+            st.session_state.api_calls = 0
             st.rerun()
 
     # Edit Chat Name
