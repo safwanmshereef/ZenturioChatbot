@@ -1,115 +1,71 @@
-# 🤖 Zenturio Chatbot — Intelligent Context-Aware Assistant
+# Zenturio Chatbot 🤖
 
-A production-grade chatbot built with **Streamlit** and the **OpenAI API**, featuring a custom sliding-window token optimizer and robust anti-hallucination prompt engineering.
+A production-grade, context-aware AI assistant built for the **ZenturioTech AI Intern Assignment**. Powered by the native Google Gemini SDK, Streamlit, and advanced Prompt Engineering.
 
-Built for the **ZenturioTech AI Intern Assignment**.
+## ✨ Features and Capabilities
 
----
+This application was engineered to precisely fulfill and exceed all assignment requirements:
 
-## ✨ Features
+- **Context-Aware Responses:** The bot maintains full conversation history, intelligently resolving pronouns (like "its") across multiple turns.
+- **Sliding-Window Token Optimizer:** Uses `tiktoken` to accurately track BPE tokens. Once the designated context window limit is reached, it dynamically truncates the oldest messages while permanently preserving the System Prompt to prevent memory crashes.
+- **Anti-Hallucination & Zero-Repetition:** A meticulously crafted 400+ token System Prompt enforces extreme honesty, prevents the bot from repeating previous answers, and explicitly instructs it to ask for clarification on vague queries.
+- **Auto Model Detection Engine:** Gracefully scans your Gemini API Key's permissions and automatically connects via the newest, most capable model available (prioritizing `gemini-3.1-pro` → `gemini-3.0` → `gemini-2.5` → `gemini-2.0`).
+- **Real-Time Analytics Dashboard:** Tracks active Session Tokens, Total API Calls, Context Window Utilization, and parsed message queues in a live, glassmorphism-styled sidebar.
+- **Data Persistence:** Chat history state is reliably maintained in memory via Streamlit Session State across reruns.
 
-| Feature | Description |
-|---|---|
-| **Context-Aware Responses** | Maintains full conversation history so follow-up questions ("What are its advantages?") correctly resolve references |
-| **Sliding-Window Token Optimization** | Custom token management using `tiktoken` — automatically truncates oldest exchanges when approaching the context limit while always preserving the system prompt |
-| **Anti-Hallucination Prompts** | System prompt explicitly instructs the model to refuse fabrication, ask for clarification, and cite uncertainty |
-| **No Repeated Answers** | Prompt engineering ensures the model tracks what it has already said and avoids redundancy |
-| **Conversation Statistics** | Real-time sidebar showing token usage, message count, and context window utilization |
-| **Streaming Responses** | Token-by-token streaming for a responsive, modern chat experience |
+## 🚀 Live Demo
 
----
+You can interact with the live deployed version of this chatbot on Streamlit Community Cloud:
+> **[ZenturioTech Chatbot Demo](https://zenturiotechchatbot.streamlit.app)**
 
 ## 🛠️ Tech Stack
 
-- **Python 3.10+**
-- **Streamlit** — Chat UI & deployment
-- **OpenAI API** — LLM backend (GPT-4o-mini)
-- **tiktoken** — Accurate BPE token counting
-- **python-dotenv** — Local environment management
+- **Frontend Framework:** Streamlit (Python)
+- **LLM Engine:** Google Generative AI (Native Gemini Python SDK)
+- **Tokenization:** Tiktoken (cl100k_base tokenizer)
+- **Environment Management:** Python-dotenv
+
+## ⚙️ How to Run Locally
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/safwanmshereef/ZenturioChatbot.git
+   cd ZenturioChatbot
+   ```
+
+2. **Install dependencies:**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure your API Key:**
+
+   Create a `.env` file in the root directory and securely add your Gemini API Key:
+
+   ```env
+   GEMINI_API_KEY="your_api_key_here"
+   ```
+
+4. **Launch the application:**
+
+   ```bash
+   python -m streamlit run app.py
+   ```
+
+   The app will automatically open in your browser at `http://localhost:8501`.
+
+## 📜 Assignment Checklist
+
+- [x] Use LLM API (Google Gemini natively)
+- [x] Maintain Chat history (In-memory via session_state)
+- [x] Context window handling (Safe token limits implemented)
+- [x] Token optimization (tiktoken sliding-window truncation)
+- [x] Context-aware prompt template (`SYSTEM_PROMPT` in `app.py`)
+- [x] Instruction to avoid hallucination (Rule #3)
+- [x] Instruction to ask clarification if unsure (Rule #4)
+- [x] Multi-turn context retention & follow-up understanding confirmed
 
 ---
-
-## 🚀 Quick Start
-
-### 1. Clone & Install
-
-```bash
-git clone https://github.com/YOUR_USERNAME/ZenturioChatbot.git
-cd ZenturioChatbot
-pip install -r requirements.txt
-```
-
-### 2. Configure API Key
-
-Create a `.env` file or use Streamlit secrets:
-
-```bash
-# Option A: .env file
-echo OPENAI_API_KEY=sk-your-key-here > .env
-
-# Option B: Streamlit secrets
-mkdir -p .streamlit
-echo 'OPENAI_API_KEY = "sk-your-key-here"' > .streamlit/secrets.toml
-```
-
-### 3. Run
-
-```bash
-streamlit run app.py
-```
-
----
-
-## 📦 Deployment (Streamlit Cloud)
-
-1. Push this repo to GitHub
-2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Connect your repo and set `app.py` as the entrypoint
-4. Add `OPENAI_API_KEY` under **Advanced Settings → Secrets**
-5. Deploy!
-
----
-
-## 🧪 Demo — Context Retention Test
-
-```
-User: Tell me about Python
-Bot:  [Explains Python programming language]
-
-User: What are its advantages?
-Bot:  [Correctly understands "its" = Python, lists advantages without repeating the intro]
-```
-
----
-
-## 📐 Architecture
-
-```
-┌─────────────────────────────────────────┐
-│           Streamlit Frontend            │
-│  ┌──────────┐  ┌─────────────────────┐  │
-│  │ Sidebar   │  │  Chat Interface     │  │
-│  │ - Stats   │  │  - Message history  │  │
-│  │ - Config  │  │  - Streaming output │  │
-│  └──────────┘  └─────────────────────┘  │
-├─────────────────────────────────────────┤
-│         Token Optimization Layer        │
-│  ┌──────────────────────────────────┐   │
-│  │  Sliding Window Manager          │   │
-│  │  - Count tokens (tiktoken)       │   │
-│  │  - Truncate oldest exchanges     │   │
-│  │  - Always preserve system prompt │   │
-│  └──────────────────────────────────┘   │
-├─────────────────────────────────────────┤
-│            OpenAI API Layer             │
-│  ┌──────────────────────────────────┐   │
-│  │  GPT-4o-mini (streaming)         │   │
-│  └──────────────────────────────────┘   │
-└─────────────────────────────────────────┘
-```
-
----
-
-## 📄 License
-
-MIT — Free for educational and personal use.
+*Developed by Safwan M Shereef for Zenturio.*
