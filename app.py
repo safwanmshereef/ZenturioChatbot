@@ -467,6 +467,25 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # Feature 1: Download Chat History
+    def generate_chat_markdown():
+        md = "# 💬 Zenturio Chat History\n\n"
+        for m in st.session_state.messages:
+            if m["role"] == "system": continue
+            role = "🧑‍💻 **User**" if m["role"] == "user" else "🤖 **Zenturio Bot**"
+            md += f"### {role}\n{m['content']}\n\n---\n\n"
+        return md
+
+    # Only show if there's an actual conversation (more than just the system prompt)
+    if len(st.session_state.messages) > 1:
+        st.download_button(
+            label="📥 Download Chat (Markdown)",
+            data=generate_chat_markdown(),
+            file_name="zenturio_chat_history.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+
     # Clear chat button
     if st.button("🗑️  Clear Conversation", use_container_width=True):
         st.session_state.messages = [
@@ -475,6 +494,25 @@ with st.sidebar:
         st.session_state.total_tokens_used = 0
         st.session_state.api_calls = 0
         st.rerun()
+
+    # Feature 2: Dynamic System Prompt Tuner
+    with st.expander("⚙️ System Prompt Tuner", expanded=False):
+        st.caption("Tweak the System Prompt dynamically without touching code.")
+        current_sys_msg = st.session_state.messages[0]["content"] if st.session_state.messages else SYSTEM_PROMPT
+        
+        new_prompt = st.text_area(
+            "Modify core instructions:",
+            value=current_sys_msg,
+            height=250,
+            label_visibility="collapsed"
+        )
+        
+        if st.button("Apply & Restart Chat", use_container_width=True):
+            # Applying a new prompt resets the conversation history for safety
+            st.session_state.messages = [{"role": "system", "content": new_prompt}]
+            st.session_state.total_tokens_used = 0
+            st.session_state.api_calls = 0
+            st.rerun()
 
     st.markdown(f"""
     <div style="text-align:center; padding: 1rem 0; color: #6B7280; font-size: 0.7rem;">
