@@ -684,15 +684,24 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
             try:
                 response = chat.send_message(last_user_msg, stream=True)
 
-                # Stream the response using st.write_stream
+                # Stream the response with robust error handling for safety blocks
                 def stream_chunks():
-                    for chunk in response:
-                        if chunk.text:
-                            yield chunk.text
+                    try:
+                        for chunk in response:
+                            try:
+                                # Safely attempt to extract text
+                                if hasattr(chunk, 'text') and chunk.text:
+                                    yield chunk.text
+                            except (ValueError, IndexError):
+                                # Blocked chunks raise ValueError on .text access
+                                yield " [⚠️ Content filtered by Gemini Safety Policy] "
+                                break
+                    except Exception as e:
+                        yield f" [⚠️ Stream error: {str(e)}] "
 
                 full_response = st.write_stream(stream_chunks())
             except Exception as e:
-                full_response = f"⚠️ An error occurred: {str(e)}"
+                full_response = f"⚠️ Gemini API Error: {str(e)}"
                 st.error(full_response)
 
     # Append assistant response to state and DB
