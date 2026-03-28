@@ -76,17 +76,14 @@ def get_api_key() -> str:
 
 
 @st.cache_resource
-def connect_to_best_model(key: str):
-    """
-    Auto-detect the best available Gemini model for this API key.
-    Tries the latest models first (Gemini 3 → 2.5 → 2.0 → 1.5),
-    verifies with a test call, then returns the model name.
-    """
+def connect_to_best_model(key):
     try:
         genai.configure(api_key=key)
 
-        # Priority list: newest/best models first
+        # Priority List: Tries Gemini 3.1/3.0 first, then 2.5, then 2.0, then 1.5
         candidates = [
+            "gemini-3.1-pro",
+            "gemini-3.1-flash",
             "gemini-3.0-pro",
             "gemini-3.0-flash",
             "gemini-2.5-flash",
@@ -94,38 +91,38 @@ def connect_to_best_model(key: str):
             "gemini-2.0-flash",
             "gemini-2.0-flash-exp",
             "gemini-1.5-pro",
-            "gemini-1.5-flash",
+            "gemini-1.5-flash"
         ]
 
-        # Get list of models this key can actually access
-        available_models = [
-            m.name.replace("models/", "") for m in genai.list_models()
-        ]
+        # Get list of what this key can actually access from Google
+        # We strip the 'models/' prefix to match our list
+        available_models = [m.name.replace(
+            "models/", "") for m in genai.list_models()]
 
-        # Find the best match from our priority list
+        # Find best match
         selected = None
         for c in candidates:
+            # Check if the candidate string exists inside any of the available model names
             if any(c in m for m in available_models):
                 selected = c
                 break
 
-        # Fallback if list_models returned nothing useful
+        # Fallback if list_models fails but key is valid
         if not selected:
             selected = "gemini-1.5-flash"
 
-        # Verification test — make sure it actually works
+        # Final Verification Test
         model = genai.GenerativeModel(selected)
         model.generate_content("test")
         return selected
-
-    except Exception:
-        # If selected model fails, try 1.5-flash as last resort
+    except Exception as e:
+        # If specific selection fails, try generic 1.5 as last resort
         try:
             genai.configure(api_key=key)
             model = genai.GenerativeModel("gemini-1.5-flash")
             model.generate_content("test")
             return "gemini-1.5-flash"
-        except Exception:
+        except:
             return None
 
 
