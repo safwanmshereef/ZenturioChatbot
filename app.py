@@ -675,3 +675,5 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
 
     # Rerun to update sidebar stats
     st.rerun()
+
+
