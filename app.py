@@ -58,6 +58,19 @@ You are a professional AI assistant. Follow these rules rigorously in every resp
 
 
 # ────────────────────────────────────────────────────────────────────
+# SAFETY SETTINGS
+# ────────────────────────────────────────────────────────────────────
+
+# Explicitly disable safety filters to prevent innocent queries (like user names) 
+# from being accidentally blocked by the default high-sensitivity filters.
+SAFETY_SETTINGS = {
+    "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+    "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+    "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+}
+
+# ────────────────────────────────────────────────────────────────────
 # MODEL AUTO-DETECTION
 # ────────────────────────────────────────────────────────────────────
 
@@ -102,7 +115,7 @@ def connect_to_best_model(key):
             if any(c in m for m in available_models):
                 # We found a match, now VERIFY it actually works
                 try:
-                    model = genai.GenerativeModel(c)
+                    model = genai.GenerativeModel(c, safety_settings=SAFETY_SETTINGS)
                     model.generate_content("test")
                     return c  # Success! Return this model
                 except Exception:
@@ -110,7 +123,7 @@ def connect_to_best_model(key):
 
         # If all candidates fail or None were found, try a generic fallback
         try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash", safety_settings=SAFETY_SETTINGS)
             model.generate_content("test")
             return "gemini-2.5-flash"
         except:
@@ -667,6 +680,7 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
     model = genai.GenerativeModel(
         active_model,
         system_instruction=SYSTEM_PROMPT,
+        safety_settings=SAFETY_SETTINGS,
     )
 
     # Convert optimized messages to Gemini format (skip system messages)
