@@ -424,26 +424,13 @@ with st.sidebar:
 
     st.markdown("#### 📊 Conversation Stats")
 
-    st.markdown(f"""
-    <div class="stat-card">
-        <div class="stat-label">Messages</div>
-        <div class="stat-value">{user_msgs + assistant_msgs}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div class="stat-card">
-        <div class="stat-label">Current Context Tokens</div>
-        <div class="stat-value">{current_tokens:,}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div class="stat-card">
-        <div class="stat-label">API Calls Made</div>
-        <div class="stat-value">{st.session_state.api_calls}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Messages", user_msgs + assistant_msgs)
+    with col2:
+        st.metric("API Calls Made", st.session_state.api_calls)
+    
+    st.metric("Current Context Tokens", f"{current_tokens:,}")
 
     # Context window utilization bar
     st.markdown("#### 🧠 Context Window")
@@ -527,12 +514,9 @@ with st.sidebar:
 # ────────────────────────────────────────────────────────────────────
 
 # Header
-st.markdown(f"""
-<div class="main-header">
-    <h1>🤖 Zenturio Chatbot</h1>
-    <p>Context-aware AI assistant with sliding-window token optimization · <strong>{active_model}</strong></p>
-</div>
-""", unsafe_allow_html=True)
+st.title("🤖 Zenturio Chatbot")
+st.caption(f"Context-aware AI assistant with sliding-window token optimization · **{active_model}**")
+st.divider()
 
 # Render chat history (skip the system prompt)
 for msg in st.session_state.messages:
