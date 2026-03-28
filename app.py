@@ -7,23 +7,23 @@ Features:
   • Maintains full conversation history via Streamlit session state
   • Sliding-window token optimization (tiktoken-based)
   • Anti-hallucination & context-aware system prompt
-  • Streaming responses via OpenAI API
+  • Streaming responses via Google Gemini API (native SDK)
+  • Auto-detects the best available Gemini model
   • Real-time token & message statistics
 """
 
 import streamlit as st
 import tiktoken
-from openai import OpenAI
+import google.generativeai as genai
 
 # ────────────────────────────────────────────────────────────────────
 # CONSTANTS
 # ────────────────────────────────────────────────────────────────────
 
-MODEL = "gpt-4o-mini"
-ENCODING_NAME = "cl100k_base"  # Tokenizer used by GPT-4o-mini
-MAX_CONTEXT_TOKENS = 3500       # Safe limit (model max is 128k, we keep it tight for demo)
+ENCODING_NAME = "cl100k_base"   # BPE tokenizer for approximate token counting
+MAX_CONTEXT_TOKENS = 3500       # Safe limit for demo purposes
 RESERVED_FOR_RESPONSE = 800     # Tokens reserved for the model's reply
-MAX_INPUT_TOKENS = MAX_CONTEXT_TOKENS - RESERVED_FOR_RESPONSE  # Budget for messages
+MAX_INPUT_TOKENS = MAX_CONTEXT_TOKENS - RESERVED_FOR_RESPONSE
 
 SYSTEM_PROMPT = """You are Zenturio, an intelligent and helpful AI assistant created for ZenturioTech.
 
@@ -58,7 +58,79 @@ You are a professional AI assistant. Follow these rules rigorously in every resp
 
 
 # ────────────────────────────────────────────────────────────────────
-# HELPER FUNCTIONS
+# MODEL AUTO-DETECTION
+# ────────────────────────────────────────────────────────────────────
+
+def get_api_key() -> str:
+    """Get the Gemini API key from Streamlit secrets or .env file."""
+    api_key = st.secrets.get("GEMINI_API_KEY", None)
+    if not api_key:
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        st.error("⚠️ **Gemini API key not found!** Please set `GEMINI_API_KEY` in `.streamlit/secrets.toml` or a `.env` file.")
+        st.stop()
+    return api_key
+
+
+@st.cache_resource
+def connect_to_best_model(key: str):
+    """
+    Auto-detect the best available Gemini model for this API key.
+    Tries the latest models first (Gemini 3 → 2.5 → 2.0 → 1.5),
+    verifies with a test call, then returns the model name.
+    """
+    try:
+        genai.configure(api_key=key)
+
+        # Priority list: newest/best models first
+        candidates = [
+            "gemini-3.0-pro",
+            "gemini-3.0-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+            "gemini-1.5-flash",
+        ]
+
+        # Get list of models this key can actually access
+        available_models = [
+            m.name.replace("models/", "") for m in genai.list_models()
+        ]
+
+        # Find the best match from our priority list
+        selected = None
+        for c in candidates:
+            if any(c in m for m in available_models):
+                selected = c
+                break
+
+        # Fallback if list_models returned nothing useful
+        if not selected:
+            selected = "gemini-1.5-flash"
+
+        # Verification test — make sure it actually works
+        model = genai.GenerativeModel(selected)
+        model.generate_content("test")
+        return selected
+
+    except Exception:
+        # If selected model fails, try 1.5-flash as last resort
+        try:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            model.generate_content("test")
+            return "gemini-1.5-flash"
+        except Exception:
+            return None
+
+
+# ────────────────────────────────────────────────────────────────────
+# TOKEN COUNTING & CONTEXT WINDOW OPTIMIZATION
 # ────────────────────────────────────────────────────────────────────
 
 @st.cache_resource
@@ -76,8 +148,8 @@ def count_tokens(text: str) -> int:
 def count_message_tokens(messages: list[dict]) -> int:
     """
     Count total tokens across all messages.
-    Follows OpenAI's token-counting convention:
-      each message has ~4 overhead tokens (role, content markers, etc.)
+    Uses tiktoken for approximate BPE token counting.
+    Each message has ~4 overhead tokens (role, content markers).
     """
     total = 0
     for msg in messages:
@@ -97,8 +169,7 @@ def optimize_context_window(messages: list[dict]) -> list[dict]:
       3. Drop the oldest user/assistant pairs first until
          total tokens fit within MAX_INPUT_TOKENS.
       4. If history is heavily truncated, inject a brief
-         "[Earlier conversation truncated]" notice so the model
-         knows context was lost.
+         "[Earlier conversation truncated]" notice.
     """
     if not messages:
         return messages
@@ -111,11 +182,10 @@ def optimize_context_window(messages: list[dict]) -> list[dict]:
     if total <= MAX_INPUT_TOKENS:
         return messages
 
-    # We must truncate. Remove oldest messages (after system prompt)
-    # until we fit. Always keep the last message (the new user query).
+    # Truncate: remove oldest messages until we fit
     truncated = False
     while len(conversation) > 1 and count_message_tokens([system_msg] + conversation) > MAX_INPUT_TOKENS:
-        conversation.pop(0)  # Drop the oldest message
+        conversation.pop(0)
         truncated = True
 
     # Build the optimized list
@@ -130,18 +200,19 @@ def optimize_context_window(messages: list[dict]) -> list[dict]:
     return optimized
 
 
-def get_client() -> OpenAI:
-    """Initialize the OpenAI client with the API key from secrets or env."""
-    api_key = st.secrets.get("OPENAI_API_KEY", None)
-    if not api_key:
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        st.error("⚠️ **OpenAI API key not found!** Please set `OPENAI_API_KEY` in `.streamlit/secrets.toml` or a `.env` file.")
-        st.stop()
-    return OpenAI(api_key=api_key)
+def convert_to_gemini_history(messages: list[dict]) -> list[dict]:
+    """
+    Convert our internal message format to Gemini's expected format.
+    Skips system messages (handled via system_instruction).
+    Maps 'assistant' role to 'model' role for Gemini.
+    """
+    history = []
+    for msg in messages:
+        if msg["role"] == "system":
+            continue  # System prompt is passed via system_instruction
+        role = "model" if msg["role"] == "assistant" else "user"
+        history.append({"role": role, "parts": [msg["content"]]})
+    return history
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -265,6 +336,19 @@ st.markdown("""
         letter-spacing: 0.03em;
     }
 
+    /* Model badge */
+    .model-badge {
+        display: inline-block;
+        background: linear-gradient(135deg, #10B981, #059669);
+        color: white;
+        padding: 0.2rem 0.6rem;
+        border-radius: 20px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        margin-top: 0.5rem;
+    }
+
     /* Feature list */
     .feature-item {
         display: flex;
@@ -282,6 +366,27 @@ st.markdown("""
     ::-webkit-scrollbar-thumb:hover { background: rgba(108,99,255,0.5); }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ────────────────────────────────────────────────────────────────────
+# INITIALIZATION — API KEY & MODEL DETECTION
+# ────────────────────────────────────────────────────────────────────
+
+api_key = get_api_key()
+
+# Auto-detect best model (cached — only runs once per session)
+if "active_model" not in st.session_state:
+    with st.spinner("🔍 Detecting best available Gemini model..."):
+        best_model = connect_to_best_model(api_key)
+    if best_model is None:
+        st.error("❌ **Could not connect to any Gemini model.** Please check your API key and quota.")
+        st.stop()
+    st.session_state.active_model = best_model
+
+active_model = st.session_state.active_model
+
+# Configure genai globally
+genai.configure(api_key=api_key)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -305,7 +410,7 @@ if "api_calls" not in st.session_state:
 # ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("""
+    st.markdown(f"""
     <div style="text-align:center; padding: 1rem 0;">
         <span style="font-size: 2.5rem;">🤖</span>
         <h2 style="background: linear-gradient(135deg, #6C63FF, #A78BFA);
@@ -315,6 +420,8 @@ with st.sidebar:
             Zenturio
         </h2>
         <span class="badge">AI ASSISTANT</span>
+        <br>
+        <span class="model-badge">⚡ {active_model}</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -380,10 +487,10 @@ with st.sidebar:
         st.session_state.api_calls = 0
         st.rerun()
 
-    st.markdown("""
+    st.markdown(f"""
     <div style="text-align:center; padding: 1rem 0; color: #6B7280; font-size: 0.7rem;">
         Built for <strong>ZenturioTech</strong><br>
-        Powered by GPT-4o-mini + tiktoken
+        Powered by {active_model} + tiktoken
     </div>
     """, unsafe_allow_html=True)
 
@@ -393,10 +500,10 @@ with st.sidebar:
 # ────────────────────────────────────────────────────────────────────
 
 # Header
-st.markdown("""
+st.markdown(f"""
 <div class="main-header">
     <h1>🤖 Zenturio Chatbot</h1>
-    <p>Context-aware AI assistant with sliding-window token optimization</p>
+    <p>Context-aware AI assistant with sliding-window token optimization · <strong>{active_model}</strong></p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -423,26 +530,40 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
     if len(optimized_messages) != len(st.session_state.messages):
         st.session_state.messages = optimized_messages
 
-    # Call the LLM with streaming
-    client = get_client()
+    # Build Gemini model with system instruction
+    model = genai.GenerativeModel(
+        active_model,
+        system_instruction=SYSTEM_PROMPT,
+    )
+
+    # Convert optimized messages to Gemini format (skip system messages)
+    gemini_history = convert_to_gemini_history(optimized_messages)
+
+    # Separate the last user message from history for send_message
+    chat_history = gemini_history[:-1] if len(gemini_history) > 1 else []
+    last_user_msg = gemini_history[-1]["parts"][0] if gemini_history else prompt
+
+    # Create chat session with history and send the latest message
+    chat = model.start_chat(history=chat_history)
 
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Thinking..."):
             try:
-                stream = client.chat.completions.create(
-                    model=MODEL,
-                    messages=optimized_messages,
-                    stream=True,
-                    temperature=0.7,
-                    max_tokens=RESERVED_FOR_RESPONSE,
-                )
-                response = st.write_stream(stream)
+                response = chat.send_message(last_user_msg, stream=True)
+
+                # Stream the response using st.write_stream
+                def stream_chunks():
+                    for chunk in response:
+                        if chunk.text:
+                            yield chunk.text
+
+                full_response = st.write_stream(stream_chunks())
             except Exception as e:
-                response = f"⚠️ An error occurred: {str(e)}"
-                st.error(response)
+                full_response = f"⚠️ An error occurred: {str(e)}"
+                st.error(full_response)
 
     # Append assistant response to state
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
     st.session_state.api_calls += 1
 
     # Track tokens
