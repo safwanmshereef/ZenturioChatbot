@@ -372,14 +372,63 @@ active_model = st.session_state.active_model
 genai.configure(api_key=api_key)
 
 
+import sqlite3
+
+# ────────────────────────────────────────────────────────────────────
+# DATABASE INITIALIZATION
+# ────────────────────────────────────────────────────────────────────
+
+DB_FILE = "chat_history.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def load_messages_from_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT role, content FROM messages ORDER BY id ASC')
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        # Default initialization
+        msg_list = [{"role": "system", "content": SYSTEM_PROMPT}]
+        save_message_to_db("system", SYSTEM_PROMPT)
+        return msg_list
+    
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+def save_message_to_db(role: str, content: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('INSERT INTO messages (role, content) VALUES (?, ?)', (role, content))
+    conn.commit()
+    conn.close()
+
+def clear_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('DELETE FROM messages')
+    conn.commit()
+    conn.close()
+
+init_db()
+
 # ────────────────────────────────────────────────────────────────────
 # SESSION STATE INITIALIZATION
 # ────────────────────────────────────────────────────────────────────
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": SYSTEM_PROMPT}
-    ]
+    st.session_state.messages = load_messages_from_db()
 
 if "total_tokens_used" not in st.session_state:
     st.session_state.total_tokens_used = 0
@@ -450,6 +499,8 @@ with st.sidebar:
 
     # Clear chat button
     if st.button("🗑️  Clear Conversation", use_container_width=True):
+        clear_db()
+        save_message_to_db("system", SYSTEM_PROMPT)
         st.session_state.messages = [
             {"role": "system", "content": SYSTEM_PROMPT}
         ]
@@ -487,8 +538,9 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
     with st.chat_message("user", avatar="🧑‍💻"):
         st.markdown(prompt)
 
-    # Append to state
+    # Append to state and DB
     st.session_state.messages.append({"role": "user", "content": prompt})
+    save_message_to_db("user", prompt)
 
     # Optimize context window (sliding-window truncation)
     optimized_messages = optimize_context_window(st.session_state.messages)
@@ -529,8 +581,9 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
                 full_response = f"⚠️ An error occurred: {str(e)}"
                 st.error(full_response)
 
-    # Append assistant response to state
+    # Append assistant response to state and DB
     st.session_state.messages.append({"role": "assistant", "content": full_response})
+    save_message_to_db("assistant", full_response)
     st.session_state.api_calls += 1
 
     # Track tokens
