@@ -384,26 +384,47 @@ from datetime import datetime
 DB_FILE = "chat_history.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS chat_sessions (
-            session_id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES chat_sessions (session_id) ON DELETE CASCADE
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        
+        # Schema migration: Drop old legacy table if it exists
+        c.execute("DROP TABLE IF EXISTS messages")
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                session_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions (session_id) ON DELETE CASCADE
+            )
+        ''')
+        
+        # Write test to confirm persistence is active
+        c.execute("CREATE TABLE IF NOT EXISTS _write_test (id INTEGER PRIMARY KEY, val TEXT)")
+        c.execute("DELETE FROM _write_test")
+        c.execute("INSERT INTO _write_test (val) VALUES ('ok')")
+        
+        conn.commit()
+        conn.close()
+        st.session_state.db_error = None
+    except Exception as e:
+        # We don't want to crash the app, but we must warn the user
+        st.session_state.db_error = str(e)
+        print(f"DATABASE ERROR: {e}")
+
+# Call exactly once
+if "db_initialized" not in st.session_state:
+    init_db()
+    st.session_state.db_initialized = True
 
 def get_all_sessions():
     conn = sqlite3.connect(DB_FILE)
@@ -462,11 +483,15 @@ init_db()
 # ────────────────────────────────────────────────────────────────────
 
 if "current_session_id" not in st.session_state:
-    sessions = get_all_sessions()
-    if sessions:
-        st.session_state.current_session_id = sessions[0]["session_id"]
-    else:
-        st.session_state.current_session_id = create_new_session()
+    try:
+        sessions = get_all_sessions()
+        if sessions:
+            st.session_state.current_session_id = sessions[0]["session_id"]
+        else:
+            st.session_state.current_session_id = create_new_session()
+    except:
+        # Fallback for read-only systems
+        st.session_state.current_session_id = "temp_fallback_id"
 
 if "messages" not in st.session_state:
     st.session_state.messages = load_messages_from_db(st.session_state.current_session_id)
@@ -483,6 +508,11 @@ if "api_calls" not in st.session_state:
 # ────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
+    # Error Display for Persistence Issues
+    if st.session_state.get("db_error"):
+        st.warning(f"⚠️ **SQLite Read-Only**: {st.session_state.db_error}")
+        st.info("The deployed version has a temporary file system. Persistence works best when running **locally**.")
+
     st.markdown(f"""
     <div style="text-align:center; padding: 1rem 0;">
         <span style="font-size: 2.5rem;">🤖</span>
