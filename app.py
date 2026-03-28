@@ -221,7 +221,9 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
     /* Global */
-    * { font-family: 'Inter', sans-serif !important; }
+    html, body, [class*="st-"] {
+        font-family: 'Inter', sans-serif;
+    }
 
     /* Main container */
     .stApp {
