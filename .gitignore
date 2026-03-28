@@ -23,4 +23,3 @@ build/
 .DS_Store
 Thumbs.db
 test_*.py
-chat_history.db  
