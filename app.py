@@ -94,36 +94,28 @@ def connect_to_best_model(key):
             "gemini-1.5-flash"
         ]
 
-        # Get list of what this key can actually access from Google
-        # We strip the 'models/' prefix to match our list
-        available_models = [m.name.replace(
-            "models/", "") for m in genai.list_models()]
+        available_models = [m.name.replace("models/", "") for m in genai.list_models()]
 
-        # Find best match
-        selected = None
         for c in candidates:
-            # Check if the candidate string exists inside any of the available model names
+            # Check if candidate string exists in available models
             if any(c in m for m in available_models):
-                selected = c
-                break
+                # We found a match, now VERIFY it actually works
+                try:
+                    model = genai.GenerativeModel(c)
+                    model.generate_content("test")
+                    return c  # Success! Return this model
+                except Exception:
+                    continue  # Fails verification, try next candidate
 
-        # Fallback if list_models fails but key is valid
-        if not selected:
-            selected = "gemini-1.5-flash"
-
-        # Final Verification Test
-        model = genai.GenerativeModel(selected)
-        model.generate_content("test")
-        return selected
-    except Exception as e:
-        # If specific selection fails, try generic 1.5 as last resort
+        # If all candidates fail or None were found, try a generic fallback
         try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             model.generate_content("test")
-            return "gemini-1.5-flash"
+            return "gemini-2.5-flash"
         except:
             return None
+    except Exception:
+        return None
 
 
 # ────────────────────────────────────────────────────────────────────
