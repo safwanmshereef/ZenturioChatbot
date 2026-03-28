@@ -373,6 +373,8 @@ genai.configure(api_key=api_key)
 
 
 import sqlite3
+import uuid
+from datetime import datetime
 
 # ────────────────────────────────────────────────────────────────────
 # DATABASE INITIALIZATION
@@ -384,40 +386,71 @@ def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            session_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
             role TEXT NOT NULL,
-            content TEXT NOT NULL
+            content TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions (session_id) ON DELETE CASCADE
         )
     ''')
     conn.commit()
     conn.close()
 
-def load_messages_from_db():
+def get_all_sessions():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('SELECT role, content FROM messages ORDER BY id ASC')
+    c.execute('SELECT session_id, name, created_at FROM chat_sessions ORDER BY created_at DESC')
     rows = c.fetchall()
     conn.close()
-    if not rows:
-        # Default initialization
-        msg_list = [{"role": "system", "content": SYSTEM_PROMPT}]
-        save_message_to_db("system", SYSTEM_PROMPT)
-        return msg_list
-    
-    return [{"role": r[0], "content": r[1]} for r in rows]
+    return [{"session_id": r[0], "name": r[1], "created_at": r[2]} for r in rows]
 
-def save_message_to_db(role: str, content: str):
+def create_new_session(name="New Chat") -> str:
+    session_id = str(uuid.uuid4())
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('INSERT INTO messages (role, content) VALUES (?, ?)', (role, content))
+    c.execute('INSERT INTO chat_sessions (session_id, name) VALUES (?, ?)', (session_id, name))
+    conn.commit()
+    conn.close()
+    save_message_to_db(session_id, "system", SYSTEM_PROMPT)
+    return session_id
+
+def rename_session(session_id: str, new_name: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('UPDATE chat_sessions SET name = ? WHERE session_id = ?', (new_name, session_id))
     conn.commit()
     conn.close()
 
-def clear_db():
+def delete_session(session_id: str):
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute("PRAGMA foreign_keys = ON")
+    c = conn.cursor()
+    c.execute('DELETE FROM chat_sessions WHERE session_id = ?', (session_id,))
+    conn.commit()
+    conn.close()
+
+def load_messages_from_db(session_id: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('DELETE FROM messages')
+    c.execute('SELECT role, content FROM chat_messages WHERE session_id = ? ORDER BY id ASC', (session_id,))
+    rows = c.fetchall()
+    conn.close()
+    if not rows:
+        return [{"role": "system", "content": SYSTEM_PROMPT}]
+    return [{"role": r[0], "content": r[1]} for r in rows]
+
+def save_message_to_db(session_id: str, role: str, content: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)', (session_id, role, content))
     conn.commit()
     conn.close()
 
@@ -427,8 +460,15 @@ init_db()
 # SESSION STATE INITIALIZATION
 # ────────────────────────────────────────────────────────────────────
 
+if "current_session_id" not in st.session_state:
+    sessions = get_all_sessions()
+    if sessions:
+        st.session_state.current_session_id = sessions[0]["session_id"]
+    else:
+        st.session_state.current_session_id = create_new_session()
+
 if "messages" not in st.session_state:
-    st.session_state.messages = load_messages_from_db()
+    st.session_state.messages = load_messages_from_db(st.session_state.current_session_id)
 
 if "total_tokens_used" not in st.session_state:
     st.session_state.total_tokens_used = 0
@@ -495,18 +535,51 @@ with st.sidebar:
     for icon, text in features:
         st.markdown(f"""<div class="feature-item">{icon} {text}</div>""", unsafe_allow_html=True)
 
-    st.markdown("---")
+    # Chat Manager
+    st.markdown("#### 💬 Chat Sessions")
+    
+    # Fetch available sessions
+    all_sessions = get_all_sessions()
+    session_options = {s["session_id"]: s["name"] for s in all_sessions}
 
-    # Clear chat button
-    if st.button("🗑️  Clear Conversation", use_container_width=True):
-        clear_db()
-        save_message_to_db("system", SYSTEM_PROMPT)
-        st.session_state.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ]
+    def on_session_change():
+        st.session_state.messages = load_messages_from_db(st.session_state.current_session_id)
         st.session_state.total_tokens_used = 0
         st.session_state.api_calls = 0
-        st.rerun()
+
+    st.selectbox(
+        "Active Chat",
+        options=list(session_options.keys()),
+        format_func=lambda x: session_options.get(x, "Unknown"),
+        key="current_session_id",
+        on_change=on_session_change,
+        label_visibility="collapsed"
+    )
+
+    colA, colB = st.columns(2)
+    with colA:
+        if st.button("➕ New Space", use_container_width=True):
+            new_id = create_new_session("New Chat")
+            st.session_state.current_session_id = new_id
+            on_session_change()
+            st.rerun()
+    with colB:
+        if st.button("🗑️ Delete", use_container_width=True):
+            delete_session(st.session_state.current_session_id)
+            updated_sessions = get_all_sessions()
+            if updated_sessions:
+                st.session_state.current_session_id = updated_sessions[0]["session_id"]
+            else:
+                st.session_state.current_session_id = create_new_session("New Chat")
+            on_session_change()
+            st.rerun()
+
+    # Edit Chat Name
+    with st.popover("✏️ Rename Chat", use_container_width=True):
+        new_name = st.text_input("New Name", value=session_options.get(st.session_state.current_session_id, "New Chat"))
+        if st.button("Save Name", use_container_width=True):
+            rename_session(st.session_state.current_session_id, new_name)
+            st.rerun()
 
     st.markdown(f"""
     <div style="text-align:center; padding: 1rem 0; color: #6B7280; font-size: 0.7rem;">
@@ -540,7 +613,7 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
 
     # Append to state and DB
     st.session_state.messages.append({"role": "user", "content": prompt})
-    save_message_to_db("user", prompt)
+    save_message_to_db(st.session_state.current_session_id, "user", prompt)
 
     # Optimize context window (sliding-window truncation)
     optimized_messages = optimize_context_window(st.session_state.messages)
@@ -583,7 +656,7 @@ if prompt := st.chat_input("Ask Zenturio anything..."):
 
     # Append assistant response to state and DB
     st.session_state.messages.append({"role": "assistant", "content": full_response})
-    save_message_to_db("assistant", full_response)
+    save_message_to_db(st.session_state.current_session_id, "assistant", full_response)
     st.session_state.api_calls += 1
 
     # Track tokens
